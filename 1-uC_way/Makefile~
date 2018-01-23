@@ -1,0 +1,14 @@
+ifneq ($(KERNELRELEASE),)
+# Called by kbuild
+obj-m += ESRGledModule.o
+
+else # Called from command line
+KDIR := /home/welckron/buildroot/buildroot-2015.08.1/output/build/linux-rpi-4.1.y
+PWD := $(shell pwd)
+CROSS=/home/welckron/buildroot/buildroot-2015.08.1/output/host/usr/bin/arm-buildroot-linux-uclibcgnueabihf-
+default:
+	$(MAKE) -C $(KDIR) M=$(PWD) ARCH=arm CROSS_COMPILE=$(CROSS) modules
+endif # End kbuild check
+
+clean:
+	rm -f -r *.o *.ko .*cmd .tmp* core *.i
