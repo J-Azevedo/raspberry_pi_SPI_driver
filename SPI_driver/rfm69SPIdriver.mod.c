@@ -25,12 +25,16 @@ __attribute__((section("__versions"))) = {
 	{ 0x6bc3fbc0, __VMLINUX_SYMBOL_STR(__unregister_chrdev) },
 	{ 0xf39cacaa, __VMLINUX_SYMBOL_STR(__class_create) },
 	{ 0xfb88e8b1, __VMLINUX_SYMBOL_STR(__register_chrdev) },
+	{ 0x14830282, __VMLINUX_SYMBOL_STR(spi_write_then_read) },
+	{ 0x7a624abd, __VMLINUX_SYMBOL_STR(spi_setup) },
+	{ 0xee35d8ad, __VMLINUX_SYMBOL_STR(device_create) },
 	{ 0xeaad5b7a, __VMLINUX_SYMBOL_STR(__mutex_init) },
 	{ 0x566df243, __VMLINUX_SYMBOL_STR(kmem_cache_alloc_trace) },
 	{ 0xfd3e178c, __VMLINUX_SYMBOL_STR(kmalloc_caches) },
-	{ 0x27e1a049, __VMLINUX_SYMBOL_STR(printk) },
 	{ 0x2e5810c6, __VMLINUX_SYMBOL_STR(__aeabi_unwind_cpp_pr1) },
 	{ 0x37a0cba, __VMLINUX_SYMBOL_STR(kfree) },
+	{ 0xea6c249c, __VMLINUX_SYMBOL_STR(device_destroy) },
+	{ 0x27e1a049, __VMLINUX_SYMBOL_STR(printk) },
 	{ 0xb1ad28e0, __VMLINUX_SYMBOL_STR(__gnu_mcount_nc) },
 };
 
@@ -40,4 +44,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "1E6E432E383E36217B1D499");
+MODULE_INFO(srcversion, "A8F0FB86CAA5491B0955FB1");

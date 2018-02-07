@@ -824,6 +824,7 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   arch/arm/include/uapi/asm/fcntl.h \
   include/uapi/asm-generic/fcntl.h \
   include/linux/cdev.h \
+  /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h \
 
 /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o: $(deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o)
 
