@@ -20,10 +20,17 @@ __attribute__((section("__versions"))) = {
 	{ 0xb344870e, __VMLINUX_SYMBOL_STR(module_layout) },
 	{ 0xaf9fc67b, __VMLINUX_SYMBOL_STR(spi_bus_type) },
 	{ 0xeec4978e, __VMLINUX_SYMBOL_STR(driver_unregister) },
+	{ 0x5a041bb8, __VMLINUX_SYMBOL_STR(class_destroy) },
 	{ 0x83e2fe2b, __VMLINUX_SYMBOL_STR(__spi_register_driver) },
-	{ 0x7a624abd, __VMLINUX_SYMBOL_STR(spi_setup) },
+	{ 0x6bc3fbc0, __VMLINUX_SYMBOL_STR(__unregister_chrdev) },
+	{ 0xf39cacaa, __VMLINUX_SYMBOL_STR(__class_create) },
+	{ 0xfb88e8b1, __VMLINUX_SYMBOL_STR(__register_chrdev) },
+	{ 0xeaad5b7a, __VMLINUX_SYMBOL_STR(__mutex_init) },
+	{ 0x566df243, __VMLINUX_SYMBOL_STR(kmem_cache_alloc_trace) },
+	{ 0xfd3e178c, __VMLINUX_SYMBOL_STR(kmalloc_caches) },
 	{ 0x27e1a049, __VMLINUX_SYMBOL_STR(printk) },
 	{ 0x2e5810c6, __VMLINUX_SYMBOL_STR(__aeabi_unwind_cpp_pr1) },
+	{ 0x37a0cba, __VMLINUX_SYMBOL_STR(kfree) },
 	{ 0xb1ad28e0, __VMLINUX_SYMBOL_STR(__gnu_mcount_nc) },
 };
 
@@ -33,4 +40,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "D4795938449088E85A93DB7");
+MODULE_INFO(srcversion, "1E6E432E383E36217B1D499");
