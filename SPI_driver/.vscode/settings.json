@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "rfm69registers.h": "c",
+        "type_traits": "c"
+    }
+}

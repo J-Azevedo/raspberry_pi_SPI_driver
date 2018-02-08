@@ -17,6 +17,7 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
+#include <linux/interrupt.h>
 
 #define DRIVER_NAME "rfm69_driver"
 #define DEVICE_NAME "RFM69"
@@ -27,6 +28,7 @@
 #define VERSION_DATA 0x24
 #define NODE_ID 3
 #define NETWORK_ID 10
+#define IRQPin  29
 
 
 
@@ -42,6 +44,13 @@ struct rfm69
 };
 static struct class *rfm_class;
 struct spi_device *spi_local;
+struct rfm69 *myrf_global;
+
+/* Define GPIOs for RX signal */
+static struct gpio signals[] = {
+		{ IRQPin, GPIOF_IN, "RX Signal" },	// Rx signal
+};
+static int rx_irqs[] = { -1 };
 
 	/*configurations for the transceiver*/
   const u8 rf_config[] =
@@ -57,7 +66,7 @@ struct spi_device *spi_local;
     /* 0x09 */  REG_FRFLSB, (uint8_t) RF_FRFLSB_433 ,
 	/* 0x0D*/   REG_LISTEN1, RF_LISTEN1_RESOL_RX_262000  |RF_LISTEN1_RESOL_IDLE_64 |RF_LISTEN1_CRITERIA_RSSIANDSYNC |RF_LISTEN1_END_01,//it goes to MODE when  PayloadReady or Timeout interrupt occurs	
     /* 0x0E*/   REG_LISTEN2, RF_LISTEN2_COEF_IDLE, // ListenCoefIdle is 1
-	/* 0x0F*/   REG_LISTEN3, RF_LISTEN3_COEFRX_VALUE, // ListenCoefRX is 0x26
+	/* 0#define IRQPin  29x0F*/   REG_LISTEN3, RF_LISTEN3_COEFRX_VALUE, // ListenCoefRX is 0x26
 	// looks like PA1 and PA2 are not implemented on RFM69W, hence the max output power is 13dBm
     // +17dBm and +20dBm are possible on RFM69HW
     // +13dBm formula: Pout = -18 + OutputPower (with PA0 or PA1**)
@@ -97,7 +106,7 @@ struct spi_device *spi_local;
 // {
 //     int err;
 //     struct spi_transfer transfer=
-//     {
+//     {#define IRQPin  29
 //             .tx_buf=buf,
 //             .len=len,
 //             .bits_per_word=16,
@@ -149,8 +158,36 @@ struct spi_device *spi_local;
 //spi read register
 u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 {
-    int value;
-    value=spi_w8r16(myrf->spi,reg);
+    int value=5;
+    u8 buf[2]={reg,0xff};
+    u8 rx_buf[2]={0};
+        struct spi_transfer transfer=
+    {
+            .tx_buf=buf,
+            .rx_buf=rx_buf,
+            .len=2,
+            .bits_per_word=8,
+    };
+        struct spi_message message;
+    printk("read\n");
+
+    if(myrf==NULL)
+    {
+        printk("error read register\n");
+        return -ENODEV;
+    }
+    mutex_lock(&myrf->lock);
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer,&message);
+    value=spi_sync(myrf->spi,&message);
+    if(value<0)
+    {
+        printk("message error\n");//see if we can change something here
+    }
+
+    //value=spi_w8r16(myrf->spi,reg);
+    printk("value %d\n b1 %d b2 %d",value, rx_buf[0], rx_buf[1]);
+    mutex_unlock(&myrf->lock);
     return value&0xff;
 }
 
@@ -161,7 +198,7 @@ u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 //     spi_write(myrf->spi,spi_value,1);
 //     return value&0xff;
 // }
-static int rfm69_open(struct file *f)
+static int rfm69_open(struct inode *inode, struct file *f)
 {
     struct rfm69 *myrf;
     int err;
@@ -175,18 +212,25 @@ static int rfm69_open(struct file *f)
     struct spi_message message;
    
 
- 
+    printk("open\n");
     mutex_lock(&device_lockm);
-     myrf=f->private_data;
-    version=rfm69_read_register(myrf,REG_VERSION);
+     f->private_data=myrf_global;
+     nonseekable_open(inode, f);
+    if(myrf_global==NULL)
+    {
+        printk("error read register open\n");
+        return -ENODEV;
+    }
+
+    version=rfm69_read_register(myrf_global,REG_VERSION);
     if(version!=VERSION_DATA)
     {
-        printk("cannot comunicate with the RF transceiver\n");//see if we can change something here
+        printk("cannot comunicate with the RF transceiver version:%d\n",version);//see if we can change something here
         mutex_unlock(&device_lockm);
 
          return -ENODEV;
     }    
-    spi_message_init(&message);
+   /* spi_message_init(&message);
     spi_message_add_tail(&transfer , &message);
     err=spi_sync(myrf->spi , &message);
     if(err<0)
@@ -196,7 +240,7 @@ static int rfm69_open(struct file *f)
 
          return err;
     }
-
+*/
     mutex_unlock(&device_lockm);
     return err;
 }
@@ -213,33 +257,33 @@ static int rfm69_probe(struct spi_device *spi)
     struct device *dev;
     printk( "probe\n");
 
-    myrf= kzalloc(sizeof(*myrf),GFP_KERNEL);
-    if(myrf==NULL)
+    myrf_global= kzalloc(sizeof(*myrf_global),GFP_KERNEL);
+    if(myrf_global==NULL)
     {
         printk("failed to to alloc memory for device\n");
     }
-    myrf->spi=spi;
-   // myrf->devt=&spi->dev;
-    mutex_init(&myrf->lock);
+    myrf_global->spi=spi;
+   // myrf_global->devt=&spi->dev;
+    mutex_init(&myrf_global->lock);
 
 	
 
-	myrf->devt = MKDEV(RF_MAJOR, 0);
+	myrf_global->devt = MKDEV(RF_MAJOR, 0);
    
 
-	dev = device_create(rfm_class, &spi->dev, myrf->devt,
-         			    myrf, "rfm69_%d.%d",
+	dev = device_create(rfm_class, &spi->dev, myrf_global->devt,
+         			   myrf_global, "rfm69_%d.%d",
 				    spi->master->bus_num, spi->chip_select);
 	ret = IS_ERR(dev) ? PTR_ERR(dev) : 0;
 
     if(ret==0)
     {
-        spi_set_drvdata(spi,myrf);
+        spi_set_drvdata(spi,myrf_global);
       
     }
     else
     {
-        kfree(myrf);
+        kfree(myrf_global);
         return ret;
     }
     spi_local=spi;
@@ -274,6 +318,7 @@ static int rfm69_probe(struct spi_device *spi)
     myrf->chip.dev = &spi->dev;
     myrf->chip.owner = THIS_MODULE; */
     //here we have to add a configuration function
+    
     return ret;
 }
 
@@ -281,7 +326,7 @@ static int rfm69_probe(struct spi_device *spi)
 static int rfm69_remove(struct spi_device *spi)
 {
 	struct rfm69 *myrf;
-    printk("remove");
+    printk("remove\n");
 	myrf = spi_get_drvdata(spi);
 	if (!myrf)
 		return -ENODEV;
@@ -311,6 +356,11 @@ MODULE_DEVICE_TABLE(of,rfm69_id_table);*/
     {},
 };
 MODULE_DEVICE_TABLE(spi,rfm69_id_table);*/
+static irqreturn_t rx_isr(int irq, void *data)
+{
+ 	return IRQ_HANDLED;
+
+}
 static const struct file_operations rfm_fops =
  {
 	.owner =	THIS_MODULE,
@@ -318,10 +368,10 @@ static const struct file_operations rfm_fops =
 	/*.write =	spidev_write,
 	.read =		spidev_read,
 	.unlocked_ioctl = spidev_ioctl,
-	.compat_ioctl = spidev_compat_ioctl,
-	.open =		spidev_open,
-	.release =	spidev_release,
-	.llseek =	no_llseek,*/
+	.compat_ioctl = spidev_compat_ioctl,*/
+	.open =		rfm69_open,
+	//.release =	spidev_release,
+	//.llseek =	no_llseek,*/
 };
 
 static struct spi_driver rfm69_driver =
@@ -365,6 +415,34 @@ static int __init rfm69_init(void)
 		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
 		return PTR_ERR(rfm_class);
 	}    
+    status = gpio_request_array(signals, ARRAY_SIZE(signals));
+    if (status)
+    {
+        printk(KERN_ERR "RFRPI - Unable to request GPIOs for RX Signals: %d\n", status);
+        free_irq(rx_irqs[0], NULL);
+        class_destroy(rfm_class);
+		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
+        return status;
+    }
+     // Register IRQ for this GPIO
+    status = gpio_to_irq(signals[0].gpio);
+    if(status < 0) {
+        printk(KERN_ERR "RFRPI - Unable to request IRQ: %d\n", status);
+         free_irq(rx_irqs[0], NULL);
+        class_destroy(rfm_class);
+		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
+        return status;
+    }
+    rx_irqs[0] = status;
+    printk(KERN_INFO "RFRPI - Successfully requested RX IRQ # %d\n", rx_irqs[0]);
+    status = request_irq(rx_irqs[0], rx_isr, IRQF_TRIGGER_RISING , "rfrpi#rx", NULL);
+    if(status) {
+        printk(KERN_ERR "RFRPI - Unable to request IRQ: %d\n", status);
+        gpio_free_array(signals, ARRAY_SIZE(signals));
+        class_destroy(rfm_class);
+		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
+        return status;
+    }
     status=spi_register_driver(&rfm69_driver);
     if(status<0)
     {
@@ -389,6 +467,11 @@ static void __exit rfm69_exit(void)
 	spi_unregister_driver(&rfm69_driver);
     //device_destroy(rfm_class, myrf->devt);
     class_destroy(rfm_class);
+    // free irqs
+	free_irq(rx_irqs[0], NULL);	
+	
+	// unregister
+	gpio_free_array(signals, ARRAY_SIZE(signals));  
 
 	unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
 }

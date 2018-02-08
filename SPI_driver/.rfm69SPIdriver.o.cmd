@@ -825,6 +825,18 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   include/uapi/asm-generic/fcntl.h \
   include/linux/cdev.h \
   /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h \
+  include/linux/interrupt.h \
+    $(wildcard include/config/irq/forced/threading.h) \
+    $(wildcard include/config/generic/irq/probe.h) \
+  include/linux/hardirq.h \
+  include/linux/ftrace_irq.h \
+    $(wildcard include/config/ftrace/nmi/enter.h) \
+  include/linux/vtime.h \
+  include/linux/context_tracking_state.h \
+    $(wildcard include/config/context/tracking.h) \
+  include/linux/static_key.h \
+  arch/arm/include/asm/hardirq.h \
+  include/linux/irq_cpustat.h \
 
 /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o: $(deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o)
 
