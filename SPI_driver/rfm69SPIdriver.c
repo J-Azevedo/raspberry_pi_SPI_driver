@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
+#include <mach/platform.h>
 #include <linux/cdev.h>
 #include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
 #include <linux/interrupt.h>
@@ -23,7 +24,7 @@
 #define DEVICE_NAME "RFM69"
 #define RF_MAJOR 177
 
-#define PIN_NUMBER 24
+#define PIN_NUMBER 10
 #define VERSION_REGISTER 0x10
 #define VERSION_DATA 0x24
 #define NODE_ID 3
@@ -45,6 +46,16 @@ struct rfm69
 static struct class *rfm_class;
 struct spi_device *spi_local;
 struct rfm69 *myrf_global;
+struct GpioRegisters
+{
+	uint32_t GPFSEL[6];
+	uint32_t Reserved1;
+	uint32_t GPSET[2];
+	uint32_t Reserved2;
+	uint32_t GPCLR[2];
+};
+struct GpioRegisters *s_pGpioRegisters;
+
 
 /* Define GPIOs for RX signal */
 static struct gpio signals[] = {
@@ -159,7 +170,7 @@ static int rx_irqs[] = { -1 };
 u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 {
     int value=5;
-    u8 buf[2]={reg,0xff};
+    u8 buf[2]={reg&0x7f,0xff};
     u8 rx_buf[2]={0};
         struct spi_transfer transfer=
     {
@@ -170,7 +181,7 @@ u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
     };
         struct spi_message message;
     printk("read\n");
-
+    printk("mosi b1 %x b2 %x\n", buf[0], buf[1]);
     if(myrf==NULL)
     {
         printk("error read register\n");
@@ -186,7 +197,7 @@ u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
     }
 
     //value=spi_w8r16(myrf->spi,reg);
-    printk("value %d\n b1 %d b2 %d",value, rx_buf[0], rx_buf[1]);
+    printk("value %d\n b1 %x b2 %x \n",value, rx_buf[0], rx_buf[1]);
     mutex_unlock(&myrf->lock);
     return value&0xff;
 }
@@ -244,6 +255,19 @@ static int rfm69_open(struct inode *inode, struct file *f)
     mutex_unlock(&device_lockm);
     return err;
 }
+/*
+static void SetCSPin(void) 
+{
+    
+	int registerIndex = PIN_NUMBER / 10;
+	int bit = (PIN_NUMBER % 10) * 3;
+
+	unsigned oldValue = s_pGpioRegisters->GPFSEL[registerIndex];
+	unsigned mask = 0b111 << bit;
+
+
+	s_pGpioRegisters->GPFSEL[registerIndex] = (oldValue & ~mask) | ((0b001 << bit) & mask);
+}*/
 
 /*
         probe function it has the role of estabilishing communication between 
@@ -255,43 +279,45 @@ static int rfm69_probe(struct spi_device *spi)
     unsigned long		minor;
     struct rfm69 *myrf;
     struct device *dev;
+
     printk( "probe\n");
 
-    myrf_global= kzalloc(sizeof(*myrf_global),GFP_KERNEL);
-    if(myrf_global==NULL)
+  
+    myrf= kzalloc(sizeof(*myrf),GFP_KERNEL);
+    if(myrf==NULL)
     {
         printk("failed to to alloc memory for device\n");
     }
-    myrf_global->spi=spi;
-   // myrf_global->devt=&spi->dev;
-    mutex_init(&myrf_global->lock);
-
+    myrf->spi=spi;
+   // myrf->devt=&spi->dev;
+    mutex_init(&myrf->lock);
+    s_pGpioRegisters = (struct GpioRegisters *) __io_address(GPIO_BASE);
 	
 
-	myrf_global->devt = MKDEV(RF_MAJOR, 0);
+	myrf->devt = MKDEV(RF_MAJOR, 0);
    
 
-	dev = device_create(rfm_class, &spi->dev, myrf_global->devt,
-         			   myrf_global, "rfm69_%d.%d",
+	dev = device_create(rfm_class, &spi->dev, myrf->devt,
+         			   myrf, "rfm69_%d.%d",
 				    spi->master->bus_num, spi->chip_select);
 	ret = IS_ERR(dev) ? PTR_ERR(dev) : 0;
 
     if(ret==0)
     {
-        spi_set_drvdata(spi,myrf_global);
+        spi_set_drvdata(spi,myrf);
       
     }
     else
     {
-        kfree(myrf_global);
+        kfree(myrf);
         return ret;
     }
     spi_local=spi;
 
-    spi->mode = (SPI_MODE_0);
+    spi->mode = (SPI_MODE_0	);
     spi->bits_per_word=8;
-    spi->max_speed_hz = 8000000;//8Mhz
-    spi->cs_gpio=24;
+    spi->max_speed_hz = 600000;//8Mhz
+  //  spi->cs_gpio=  s_pGpioRegisters->GPFSEL[10/10] ;
     ret = spi_setup(spi);
     if(ret<0)
     {
