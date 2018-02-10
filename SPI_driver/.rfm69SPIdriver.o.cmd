@@ -823,7 +823,6 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   include/uapi/linux/fcntl.h \
   arch/arm/include/uapi/asm/fcntl.h \
   include/uapi/asm-generic/fcntl.h \
-  arch/arm/mach-bcm2709/include/mach/platform.h \
   include/linux/cdev.h \
   /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h \
   include/linux/interrupt.h \
@@ -838,6 +837,8 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   include/linux/static_key.h \
   arch/arm/include/asm/hardirq.h \
   include/linux/irq_cpustat.h \
+  include/linux/delay.h \
+  arch/arm/include/asm/delay.h \
 
 /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o: $(deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o)
 

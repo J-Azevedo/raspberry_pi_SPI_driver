@@ -1,0 +1,43 @@
+/*
+ * Device Tree overlay for using rfm69 spi protcol driver instead of spidev
+ *
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2835", "brcm,bcm2708", "brcm,bcm2709";
+    /* disable spi-dev for spi0.0 & spi0.1 */
+    fragment@0 {
+	target = <&spi0>;
+	__overlay__ {
+		status = "okay";
+
+		spidev@0{
+			status = "disabled";
+		};
+		spidev@1{
+			status = "disabled";
+		};
+	};
+    };
+
+
+
+    fragment@1 {
+	target = <&spi0>;
+	__overlay__ {
+
+
+        rfm69@0 {
+			reg = <0>;	/* CE0 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			spi-max-frequency = <500000>;
+			status = "okay";
+            };
+
+	};
+    };
+};

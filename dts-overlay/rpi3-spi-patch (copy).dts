@@ -39,7 +39,8 @@
             #address-cells = <1>;
             #size-cells = <0>;
             pinctrl-names = "default";
-            pinctrl-0 = <&spi0_pins>;
+        	pinctrl-0 = <&spi0_pins &spi0_cs_pins>;
+	        cs-gpios = <&gpio 8 1>, <&gpio 7 1>;
 
             rfm69@0 {
                 compatible = "rfm69_driver";
