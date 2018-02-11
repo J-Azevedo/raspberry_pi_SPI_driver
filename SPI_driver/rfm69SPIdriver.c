@@ -19,6 +19,11 @@
 #include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/uaccess.h>
+#include <linux/signal.h>
+#include <config/posix/mqueue.h>
+#include <uapi/linux/mqueue.h>
+
 
 #define DRIVER_NAME "rfm69_driver"
 #define DEVICE_NAME "RFM69"
@@ -31,17 +36,21 @@
 #define NETWORK_ID 10
 #define IRQPin  29
 
+#define TX_MODE RF_OPMODE_SEQUENCER_ON|RF_OPMODE_TRANSMITTER|RF_OPMODE_LISTEN_OFF
+
+/* name of the POSIX object referencing the queue */
+#define MSGQOBJ_NAME    "/transceiverQueue"
+/* max length of a message (just for this process) */
+#define MAX_MSG_LEN     70
 
 
-//later put here irq pin number->after communication with RFM69 is finished
-static DEFINE_MUTEX(device_lockm);
 struct rfm69
 {
     struct mutex          lock;
     dev_t			devt;
-   // struct device         *dev;
-  //  struct gpio_chip      chip;//lets hope this works on the rasp->possible huge problem
     struct spi_device     *spi; 
+    mqd_t msgq_id;
+    int PID;
 };
 static struct class *rfm_class;
 struct spi_device *spi_local;
@@ -56,7 +65,7 @@ static int rx_irqs[] = { -1 };
 	/*configurations for the transceiver*/
   const u8 rf_config[] =
   {
-    /* 0x01 */  REG_OPMODE, RF_OPMODE_SEQUENCER_ON | RF_OPMODE_LISTEN_OFF | RF_OPMODE_STANDBY ,//turn on the sequencer, turn off listen, put the transceiver on standby
+    /* 0x01 */  REG_OPMODE, RF_OPMODE_SEQUENCER_ON | RF_OPMODE_LISTEN_ON | RF_OPMODE_STANDBY,//turn on the sequencer, turn on listen mode
     /* 0x02 */  REG_DATAMODUL, RF_DATAMODUL_DATAMODE_PACKET | RF_DATAMODUL_MODULATIONTYPE_FSK | RF_DATAMODUL_MODULATIONSHAPING_00 , // no shaping
     /* 0x03 */  REG_BITRATEMSB, RF_BITRATEMSB_50000   , // speed of 250kbps->might be to fast testing needed
     /* 0x04 */  REG_BITRATELSB, RF_BITRATELSB_50000,
@@ -66,8 +75,8 @@ static int rx_irqs[] = { -1 };
     /* 0x08 */  REG_FRFMID, (uint8_t)RF_FRFMID_433 ,
     /* 0x09 */  REG_FRFLSB, (uint8_t) RF_FRFLSB_433 ,
 	/* 0x0D*/   REG_LISTEN1, RF_LISTEN1_RESOL_RX_262000  |RF_LISTEN1_RESOL_IDLE_64 |RF_LISTEN1_CRITERIA_RSSIANDSYNC |RF_LISTEN1_END_01,//it goes to MODE when  PayloadReady or Timeout interrupt occurs	
-    /* 0x0E*/   REG_LISTEN2, RF_LISTEN2_COEF_IDLE, // ListenCoefIdle is 1
-	/* 0#define IRQPin  29x0F*/   REG_LISTEN3, RF_LISTEN3_COEFRX_VALUE, // ListenCoefRX is 0x26
+    /* 0x0E*/   REG_LISTEN2, 0x01, // ListenCoefIdle is 1
+	/* 0#define IRQPin  29x0F*/   REG_LISTEN3, 0xff, // ListenCoefRX is 0x26
 	// looks like PA1 and PA2 are not implemented on RFM69W, hence the max output power is 13dBm
     // +17dBm and +20dBm are possible on RFM69HW
     // +13dBm formula: Pout = -18 + OutputPower (with PA0 or PA1**)
@@ -82,7 +91,7 @@ static int rx_irqs[] = { -1 };
     /* 0x2E */  REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_0 ,
     /* 0x2F */  REG_SYNCVALUE1, 0x2D ,      // sync value
     /* 0x30 */  REG_SYNCVALUE2, NETWORK_ID , // NETWORK ID
-   /* 0x37 */  REG_PACKETCONFIG1, RF_PACKET1_FORMAT_FIXED | RF_PACKET1_DCFREE_OFF | RF_PACKET1_CRC_ON | RF_PACKET1_CRCAUTOCLEAR_ON | RF_PACKET1_ADRSFILTERING_NODE ,
+    /* 0x37 */  REG_PACKETCONFIG1, RF_PACKET1_FORMAT_FIXED | RF_PACKET1_DCFREE_OFF | RF_PACKET1_CRC_ON | RF_PACKET1_CRCAUTOCLEAR_ON | RF_PACKET1_ADRSFILTERING_NODE ,
     /* 0x38 */  REG_PAYLOADLENGTH, 0x0A , // packet length of 10 bytes -> also needs testing
 	/* 0x39 */  REG_NODEADRS, NODE_ID , 
     /* 0x3C */  REG_FIFOTHRESH, RF_FIFOTHRESH_TXSTART_FIFONOTEMPTY | RF_FIFOTHRESH_VALUE , // TX on FIFO not empty ->also need test
@@ -154,58 +163,146 @@ static int rx_irqs[] = { -1 };
 
 
 // }
-
-
 //spi read register
-u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
+static u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 {
     int value=5;
-    u8 buf[2]={reg,0xff};
+    u8 tx_buf[2]={(reg&0x7f),0xff};
     u8 rx_buf[2]={0};
         struct spi_transfer transfer=
     {
-            .tx_buf=buf,
+            .tx_buf=tx_buf,
             .rx_buf=rx_buf,
             .len=2,
             .bits_per_word=8,
     };
-        struct spi_message message;
-    printk("read\n");
+    struct spi_message message;
+    printk("read register\n");
 
     if(myrf==NULL)
     {
-        printk("error read register\n");
+        printk("failed to access spi device\n");
         return -ENODEV;
     }
-    mutex_lock(&myrf->lock);
-   // spi_set_cs(myrf->spi,false);
-  //  udelay(5);
     spi_message_init(&message);
     spi_message_add_tail(&transfer,&message);
     value=spi_sync(myrf->spi,&message);
     if(value<0)
     {
-        printk("message error\n");//see if we can change something here
+        printk("read register failed\n");//see if we can change something here
+        return value;
     }
-  //  spi_set_cs(myrf->spi,false);
-    //value=spi_w8r16(myrf->spi,reg);
-    printk("value %d\n b1 %x b2 %x\n",value, rx_buf[0], rx_buf[1]);
-    mutex_unlock(&myrf->lock);
-    return value&0xff;
+    printk("transmission return value %d\nmosi b1 %x b2 %x\nmiso b1 %x b2 %x\n",value,tx_buf[0],tx_buf[1], rx_buf[0], rx_buf[1]);
+
+    return rx_buf[1];
 }
 
-// //spi write register
-// u8 rfm69_write_register(struct rm69 *myrf, u8 reg, u8 value)
-// {
-//     u16 spi_value=(((reg|0x80)<<8)|value);
-//     spi_write(myrf->spi,spi_value,1);
-//     return value&0xff;
-// }
-static int rfm69_open(struct inode *inode, struct file *f)
+//spi write register
+static u8 rfm69_write_register(struct rfm69 *myrf, u8 reg, u8 value)
 {
-    struct rfm69 *myrf;
     int err;
-    u8 version;
+    u8 tx_buf[2]={(reg|0x80),value};
+    u8 rx_buf[2]={0};
+        struct spi_transfer transfer=
+    {
+            .tx_buf=tx_buf,
+            .rx_buf=rx_buf,
+            .len=2,
+            .bits_per_word=8,
+    };
+    struct spi_message message;
+    printk("write register\n");
+
+    if(myrf==NULL)
+    {
+        printk("failed to access spi device\n");
+        return -ENODEV;
+    }
+
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer,&message);
+    err=spi_sync(myrf->spi,&message);
+    if(err<0)
+    {
+        printk("write register failed\n");//see if we can change something here
+
+        return err;
+    }
+    
+    printk("transmission return value %d\nmosi b1 %x b2 %x\nmiso b1 %x b2 %x\n",value,tx_buf[0],tx_buf[1], rx_buf[0], rx_buf[1]);
+
+    return 0;
+}
+static int rfm69_write_FIFO_message(struct rfm69 *myrf, char *buf, int len)
+{
+        int err;
+    struct spi_transfer transfer=
+    {
+            .tx_buf=buf,
+            .len=len,
+            .bits_per_word=8,
+    };
+    struct spi_message message;
+   
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer , &message);
+    err=spi_sync(myrf->spi , &message);
+    if(err<0)
+    {
+        printk("message was not transmited\n");
+        
+
+    }
+    return err;
+
+
+}
+static ssize_t rfm69_write(struct file *filp, const char __user *buf,
+		                        size_t count, loff_t *f_pos)
+{
+    ssize_t status=0;
+    unsigned long missing;
+    char *buffer;
+    int err;
+    
+    mutex_lock(&myrf_global);
+    
+    buffer= kmalloc(count,GFP_KERNEL);
+
+    missing = copy_from_user(buffer, buf, count);
+    if (missing == 0)
+    {
+        status = rfm69_write_FIFO_message(myrf_global, buffer,count);
+        kfree(buffer);
+    }
+	else
+    {
+        status = -EFAULT;
+
+    }
+    rfm69_write_register(myrf_global,REG_OPMODE,TX_MODE);
+    udelay(5);
+    err=(rfm69_read_register(myrf_global,REG_IRQFLAGS1)&RF_IRQFLAGS1_MODEREADY);
+    if(err==0)
+    {
+        printk("transceiver did not transmit message\n");
+        status=-ECOMM;
+    }
+    mutex_unlock(&myrf_global);
+
+
+    return status;
+}
+
+
+
+
+
+
+
+static int rfm69_config(struct rfm69 *myrf)
+{
+    int err;
     struct spi_transfer transfer=
     {
             .tx_buf=rf_config,
@@ -214,37 +311,60 @@ static int rfm69_open(struct inode *inode, struct file *f)
     };
     struct spi_message message;
    
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer , &message);
+    err=spi_sync(myrf->spi , &message);
+    if(err<0)
+    {
+        printk("rf transceiver configuration error\n");//see if we can change something here
+    
 
+    }
+    return err;
+
+}
+static int rfm69_open(struct inode *inode, struct file *f)
+{
+    struct rfm69 *myrf;
+    int err;
+    u8 version;
+
+    f->private_data=myrf_global;
     printk("open\n");
-    mutex_lock(&device_lockm);
-     f->private_data=myrf_global;
+    mutex_lock(&myrf_global->lock);
+    //need to find a way to get PID from daemon process, it can even be provided
+    //by reference here
+
+
      nonseekable_open(inode, f);
     if(myrf_global==NULL)
     {
-        printk("error read register open\n");
+        printk("failed to access spi device\n");
+        mutex_unlock(&myrf_global->lock);
         return -ENODEV;
     }
 
     version=rfm69_read_register(myrf_global,REG_VERSION);
     if(version!=VERSION_DATA)
     {
-        printk("cannot comunicate with the RF transceiver version:%d\n",version);//see if we can change something here
-        mutex_unlock(&device_lockm);
+        printk("cannot comunicate with the RF transceiver\n",version);//see if we can change something here
+        mutex_unlock(&myrf_global->lock);
 
          return -ENODEV;
-    }    
-   /* spi_message_init(&message);
-    spi_message_add_tail(&transfer , &message);
-    err=spi_sync(myrf->spi , &message);
-    if(err<0)
-    {
-        printk("rf transceiver configuration error\n");//see if we can change something here
-        mutex_unlock(&device_lockm);
-
-         return err;
     }
-*/
-    mutex_unlock(&device_lockm);
+    err=rfm69_config(myrf_global);
+    /* opening the queue using default attributes  --  mq_open() */
+   /* myrf_global->msgq_id = mq_open(MSGQOBJ_NAME, O_WRONLY | O_CREAT, S_IRWXU | S_IRWXG, NULL);
+    if (myrf_global->msgq_id == (mqd_t)-1) {
+        printk("In mq_open()");
+        mutex_unlock(&myrf_global->lock);
+        return -ENOSPC;
+    }*/
+
+  
+
+
+    mutex_unlock(&myrf_global->lock);
     return err;
 }
 
@@ -296,37 +416,22 @@ static int rfm69_probe(struct spi_device *spi)
     spi->bits_per_word=8;
     i=spi->master->num_chipselect;
     k=(*spi->master->cs_gpios);
-    printk("\nchip select %d\n",i);
-    printk("\nchip select gpio %d\n",k);
-
-   // spi->max_speed_hz = 500000;//8Mhz
     spi->cs_gpio=8;
     ret = spi_setup(spi);
+
     if(ret<0)
     {
-        printk("configuration");
+        printk("failed to configure spi device\n");
         return ret;
     }
     else
     {
-        printk("ok\n");
+        printk("spi device correclty configured\n");
+        printk("chip select %d\n",i);
+        printk("chip select gpio %d\n",k);
+
     }
-   /*  //see later what to put more
-    myrf=kzalloc(sizeof(struct rfm69),GFP_KERNEL);
-    mutex_init(&myrf->lock);
-    dev_set_drvdata(&spi->dev,myrf);
-   //fix this part
-    myrf->version_register=VERSION_REGISTER;
-    myrf->version=VERSION_DATA;
-    myrf->spi = spi;
-    myrf->chip.label=DRIVER_NAME;
-    //myrf->chip.set=rfm69_set;->need to create set function to change pin output->do later
-    myrf->chip.base = pdata->base;
-    myrf->chip.ngpio = PIN_NUMBER;
-    myrf->chip.can_sleep = 1;
-    myrf->chip.dev = &spi->dev;
-    myrf->chip.owner = THIS_MODULE; */
-    //here we have to add a configuration function
+
     
     return ret;
 }
@@ -367,20 +472,55 @@ MODULE_DEVICE_TABLE(of,rfm69_id_table);*/
 MODULE_DEVICE_TABLE(spi,rfm69_id_table);*/
 static irqreturn_t rx_isr(int irq, void *data)
 {
+    int value=5;
+    u8 tx_buf[0xA]={0x0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+    u8 rx_buf[0xA]={0};
+    siginfo_t info;
+        struct spi_transfer transfer=
+    {
+            .tx_buf=tx_buf,
+            .rx_buf=rx_buf,
+            .len=0xA,
+            .bits_per_word=8,
+    };
+    struct spi_message message;
+    printk("Message received by the transceiver\n");
+
+    if(myrf_global==NULL)
+    {
+        printk("failed to access spi device\n");
+        return -ENODEV;
+    }
+    mutex_lock(&myrf_global->lock);
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer,&message);
+    value=spi_sync(myrf_global->spi,&message);
+
+    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_LISTENABORT|RF_OPMODE_STANDBY);
+    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_STANDBY);
+    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_ON|RF_OPMODE_STANDBY);
+
+    //put here to write register to put back on listen mode
+    /* sending the message      --  mq_send() */
+  //  mq_send(myrf_global->msgq_id, rx_buf, MAX_MSG_LEN, 1);
+
+    info.si_signo = SIGTRAP;
+	info.si_code = 1;
+	info.si_int  = 1234;
+    send_sig_info( SIGUSR1, &info,myrf_global->PID );
+    //put message queue here
+    //send signal here
+    mutex_unlock(&myrf_global->lock);
+
  	return IRQ_HANDLED;
 
 }
 static const struct file_operations rfm_fops =
  {
 	.owner =	THIS_MODULE,
+    .open =		rfm69_open,
+	.write =	rfm69_write,
 
-	/*.write =	spidev_write,
-	.read =		spidev_read,
-	.unlocked_ioctl = spidev_ioctl,
-	.compat_ioctl = spidev_compat_ioctl,*/
-	.open =		rfm69_open,
-	//.release =	spidev_release,
-	//.llseek =	no_llseek,*/
 };
 
 static struct spi_driver rfm69_driver =
@@ -390,26 +530,16 @@ static struct spi_driver rfm69_driver =
         .name = DRIVER_NAME,
        .bus  = &spi_bus_type, 
        .owner = THIS_MODULE,
-     //  .of_match_table=rfm69_id_table,
     },
     .probe    = rfm69_probe,
     .remove   = rfm69_remove,
-    //.id_table = rfm69_id_table,
 };
 
 static int __init rfm69_init(void)
 {
   int status;
 
-    // struct spi_board_info spi_rfm_info =
-    // {
-    //     .modalias="spidev0.2",
-    //     .max_speed_hz=8000000,
-    //     .bus_num=0,
-    //  //   .chip_select=0,->see this one later has i think i will get problems
-    //     .mode=SPI_MODE_0,
-    //     //irq->later
-    // };
+
     printk( "init\n");
     status=register_chrdev(RF_MAJOR,"spi",&rfm_fops);
     if(status<0)

@@ -839,6 +839,16 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   include/linux/irq_cpustat.h \
   include/linux/delay.h \
   arch/arm/include/asm/delay.h \
+  include/linux/uaccess.h \
+  arch/arm/include/asm/uaccess.h \
+    $(wildcard include/config/have/efficient/unaligned/access.h) \
+    $(wildcard include/config/cpu/sw/domain/pan.h) \
+    $(wildcard include/config/cpu/use/domains.h) \
+    $(wildcard include/config/uaccess/with/memcpy.h) \
+  arch/arm/include/asm/domain.h \
+    $(wildcard include/config/io/36.h) \
+  include/config/posix/mqueue.h \
+  include/uapi/linux/mqueue.h \
 
 /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o: $(deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o)
 

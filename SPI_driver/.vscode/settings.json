@@ -2,6 +2,7 @@
     "files.associations": {
         "rfm69registers.h": "c",
         "type_traits": "c",
-        "io.h": "c"
+        "io.h": "c",
+        "mqueue.h": "c"
     }
 }
