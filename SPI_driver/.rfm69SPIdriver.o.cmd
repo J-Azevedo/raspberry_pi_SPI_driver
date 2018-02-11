@@ -824,7 +824,6 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
   arch/arm/include/uapi/asm/fcntl.h \
   include/uapi/asm-generic/fcntl.h \
   include/linux/cdev.h \
-  /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h \
   include/linux/interrupt.h \
     $(wildcard include/config/irq/forced/threading.h) \
     $(wildcard include/config/generic/irq/probe.h) \
@@ -847,8 +846,7 @@ deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriv
     $(wildcard include/config/uaccess/with/memcpy.h) \
   arch/arm/include/asm/domain.h \
     $(wildcard include/config/io/36.h) \
-  include/config/posix/mqueue.h \
-  include/uapi/linux/mqueue.h \
+  /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h \
 
 /home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o: $(deps_/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/rfm69SPIdriver.o)
 

@@ -4,7 +4,6 @@
 *
 */
 
-
 #include <linux/init.h>
 #include <linux/mutex.h>
 #include <linux/spi/spi.h>
@@ -16,13 +15,13 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
-#include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
 #include <linux/signal.h>
-#include <config/posix/mqueue.h>
-#include <uapi/linux/mqueue.h>
+#include <linux/sched.h>
+#include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
+
 
 
 #define DRIVER_NAME "rfm69_driver"
@@ -34,24 +33,30 @@
 #define VERSION_DATA 0x24
 #define NODE_ID 3
 #define NETWORK_ID 10
-#define IRQPin  29
+#define IRQPin  25
 
 #define TX_MODE RF_OPMODE_SEQUENCER_ON|RF_OPMODE_TRANSMITTER|RF_OPMODE_LISTEN_OFF
 
-/* name of the POSIX object referencing the queue */
-#define MSGQOBJ_NAME    "/transceiverQueue"
-/* max length of a message (just for this process) */
-#define MAX_MSG_LEN     70
 
 
 struct rfm69
 {
     struct mutex          lock;
-    dev_t			devt;
+    dev_t			      devt;
     struct spi_device     *spi; 
-    mqd_t msgq_id;
-    int PID;
+    pid_t                  PID;
 };
+
+
+static struct receivedMessages
+{
+    u8 message[0xA];
+    struct receivedMessages *next;
+
+}*headList;
+
+static struct receivedMessages *tailList;
+
 static struct class *rfm_class;
 struct spi_device *spi_local;
 struct rfm69 *myrf_global;
@@ -65,104 +70,43 @@ static int rx_irqs[] = { -1 };
 	/*configurations for the transceiver*/
   const u8 rf_config[] =
   {
-    /* 0x01 */  REG_OPMODE, RF_OPMODE_SEQUENCER_ON | RF_OPMODE_LISTEN_ON | RF_OPMODE_STANDBY,//turn on the sequencer, turn on listen mode
-    /* 0x02 */  REG_DATAMODUL, RF_DATAMODUL_DATAMODE_PACKET | RF_DATAMODUL_MODULATIONTYPE_FSK | RF_DATAMODUL_MODULATIONSHAPING_00 , // no shaping
-    /* 0x03 */  REG_BITRATEMSB, RF_BITRATEMSB_50000   , // speed of 250kbps->might be to fast testing needed
-    /* 0x04 */  REG_BITRATELSB, RF_BITRATELSB_50000,
-    /* 0x05 */  REG_FDEVMSB, RF_FDEVMSB_50000, // default: 5KHz, (FDEV + BitRate / 2 <= 500KHz)
-    /* 0x06 */  REG_FDEVLSB, RF_FDEVLSB_50000,	
-    /* 0x07 */  REG_FRFMSB, (uint8_t) RF_FRFMSB_433    ,//put frequency of 433 MH<
-    /* 0x08 */  REG_FRFMID, (uint8_t)RF_FRFMID_433 ,
-    /* 0x09 */  REG_FRFLSB, (uint8_t) RF_FRFLSB_433 ,
-	/* 0x0D*/   REG_LISTEN1, RF_LISTEN1_RESOL_RX_262000  |RF_LISTEN1_RESOL_IDLE_64 |RF_LISTEN1_CRITERIA_RSSIANDSYNC |RF_LISTEN1_END_01,//it goes to MODE when  PayloadReady or Timeout interrupt occurs	
-    /* 0x0E*/   REG_LISTEN2, 0x01, // ListenCoefIdle is 1
-	/* 0#define IRQPin  29x0F*/   REG_LISTEN3, 0xff, // ListenCoefRX is 0x26
+    /* 0x01 */  REG_OPMODE|0x80, RF_OPMODE_SEQUENCER_ON | RF_OPMODE_LISTEN_ON | RF_OPMODE_STANDBY,//turn on the sequencer, turn on listen mode
+    /* 0x02 */  REG_DATAMODUL|0x80, RF_DATAMODUL_DATAMODE_PACKET | RF_DATAMODUL_MODULATIONTYPE_FSK | RF_DATAMODUL_MODULATIONSHAPING_00 , // no shaping
+    /* 0x03 */  REG_BITRATEMSB|0x80, RF_BITRATEMSB_50000   , // speed of 250kbps->might be to fast testing needed
+    /* 0x04 */  REG_BITRATELSB|0x80, RF_BITRATELSB_50000,
+    /* 0x05 */  REG_FDEVMSB|0x80, RF_FDEVMSB_50000, // default: 5KHz, (FDEV + BitRate / 2 <= 500KHz)
+    /* 0x06 */  REG_FDEVLSB|0x80, RF_FDEVLSB_50000,	
+    /* 0x07 */  REG_FRFMSB|0x80, (uint8_t) RF_FRFMSB_433    ,//put frequency of 433 MH<
+    /* 0x08 */  REG_FRFMID|0x80, (uint8_t)RF_FRFMID_433 ,
+    /* 0x09 */  REG_FRFLSB|0x80, (uint8_t) RF_FRFLSB_433 ,
+	/* 0x0D*/   REG_LISTEN1|0x80, RF_LISTEN1_RESOL_RX_262000  |RF_LISTEN1_RESOL_IDLE_64 |RF_LISTEN1_CRITERIA_RSSIANDSYNC |RF_LISTEN1_END_01,//it goes to MODE when  PayloadReady or Timeout interrupt occurs	
+    /* 0x0E*/   REG_LISTEN2|0x80, 0x01, // ListenCoefIdle is 1
+	/* 0x0F*/   REG_LISTEN3|0x80, 0xff, // ListenCoefRX is 0x26
 	// looks like PA1 and PA2 are not implemented on RFM69W, hence the max output power is 13dBm
     // +17dBm and +20dBm are possible on RFM69HW
     // +13dBm formula: Pout = -18 + OutputPower (with PA0 or PA1**)
-   /* 0x11 */  REG_PALEVEL, RF_PALEVEL_PA0_ON | RF_PALEVEL_PA1_OFF | RF_PALEVEL_PA2_OFF | RF_PALEVEL_OUTPUTPOWER_11111,
-   /* 0x13 */  REG_OCP, RF_OCP_ON | RF_OCP_TRIM_95 , // over current protection (default is 95mA)
-    /* 0x19 */  REG_RXBW, RF_RXBW_DCCFREQ_010 | RF_RXBW_MANT_16 | RF_RXBW_EXP_2 , // (BitRate < 2 * RxBw) -> need to test this configuration
-    /* 0x25 */  REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01 , // DIO0 is the only IRQ we're using
-    /* 0x26 */  REG_DIOMAPPING2, RF_DIOMAPPING2_CLKOUT_OFF , // DIO5 ClkOut disable for power saving
-    /* 0x28 */  REG_IRQFLAGS2, RF_IRQFLAGS2_FIFOOVERRUN , // writing to this bit ensures that the FIFO & status flags are reset
-    /* 0x29 */  REG_RSSITHRESH, 220 , // must be set to dBm = (-Sensitivity / 2), default is 0xE4 = 228 so -114dBm
-    /* 0x2D */  REG_PREAMBLELSB, RF_PREAMBLESIZE_LSB_VALUE , // default 3 preamble bytes 0xAAAAAA
-    /* 0x2E */  REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_0 ,
-    /* 0x2F */  REG_SYNCVALUE1, 0x2D ,      // sync value
-    /* 0x30 */  REG_SYNCVALUE2, NETWORK_ID , // NETWORK ID
-    /* 0x37 */  REG_PACKETCONFIG1, RF_PACKET1_FORMAT_FIXED | RF_PACKET1_DCFREE_OFF | RF_PACKET1_CRC_ON | RF_PACKET1_CRCAUTOCLEAR_ON | RF_PACKET1_ADRSFILTERING_NODE ,
-    /* 0x38 */  REG_PAYLOADLENGTH, 0x0A , // packet length of 10 bytes -> also needs testing
-	/* 0x39 */  REG_NODEADRS, NODE_ID , 
-    /* 0x3C */  REG_FIFOTHRESH, RF_FIFOTHRESH_TXSTART_FIFONOTEMPTY | RF_FIFOTHRESH_VALUE , // TX on FIFO not empty ->also need test
-  	/* 0x3D */  REG_PACKETCONFIG2, RF_PACKET2_RXRESTARTDELAY_64BITS   | RF_PACKET2_AUTORXRESTART_ON | RF_PACKET2_AES_OFF , // RXRESTARTDELAY must match transmitter PA ramp-down time (bitrate dependent), AES encryption enabled
-	/* 0x6F */  REG_TESTDAGC, RF_DAGC_IMPROVED_LOWBETA0 , // run DAGC continuously in RX mode for Fading Margin Improvement, recommended default for AfcLowBetaOn=0
+   /* 0x11 */  REG_PALEVEL|0x80, RF_PALEVEL_PA0_ON | RF_PALEVEL_PA1_OFF | RF_PALEVEL_PA2_OFF | RF_PALEVEL_OUTPUTPOWER_11111,
+   /* 0x13 */  REG_OCP|0x80, RF_OCP_ON | RF_OCP_TRIM_95 , // over current protection (default is 95mA)
+    /* 0x19 */  REG_RXBW|0x80, RF_RXBW_DCCFREQ_010 | RF_RXBW_MANT_16 | RF_RXBW_EXP_2 , // (BitRate < 2 * RxBw) -> need to test this configuration
+    /* 0x25 */  REG_DIOMAPPING1|0x80, RF_DIOMAPPING1_DIO0_01 , // DIO0 is the only IRQ we're using
+    /* 0x26 */  REG_DIOMAPPING2|0x80, RF_DIOMAPPING2_CLKOUT_OFF , // DIO5 ClkOut disable for power saving
+    /* 0x28 */  REG_IRQFLAGS2|0x80, RF_IRQFLAGS2_FIFOOVERRUN , // writing to this bit ensures that the FIFO & status flags are reset
+    /* 0x29 */  REG_RSSITHRESH|0x80, 220 , // must be set to dBm = (-Sensitivity / 2), default is 0xE4 = 228 so -114dBm
+    /* 0x2D */  REG_PREAMBLELSB|0x80, RF_PREAMBLESIZE_LSB_VALUE , // default 3 preamble bytes 0xAAAAAA
+    /* 0x2E */  REG_SYNCCONFIG|0x80, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_0 ,
+    /* 0x2F */  REG_SYNCVALUE1|0x80, 0x2D ,      // sync value
+    /* 0x30 */  REG_SYNCVALUE2|0x80, NETWORK_ID , // NETWORK ID
+    /* 0x37 */  REG_PACKETCONFIG1|0x80, RF_PACKET1_FORMAT_FIXED | RF_PACKET1_DCFREE_OFF | RF_PACKET1_CRC_ON | RF_PACKET1_CRCAUTOCLEAR_ON | RF_PACKET1_ADRSFILTERING_NODE ,
+    /* 0x38 */  REG_PAYLOADLENGTH|0x80, 0x0A , // packet length of 10 bytes -> also needs testing
+	/* 0x39 */  REG_NODEADRS|0x80, NODE_ID , 
+    /* 0x3C */  REG_FIFOTHRESH|0x80, RF_FIFOTHRESH_TXSTART_FIFONOTEMPTY | RF_FIFOTHRESH_VALUE , // TX on FIFO not empty ->also need test
+  	/* 0x3D */  REG_PACKETCONFIG2|0x80, RF_PACKET2_RXRESTARTDELAY_64BITS   | RF_PACKET2_AUTORXRESTART_ON | RF_PACKET2_AES_OFF , // RXRESTARTDELAY must match transmitter PA ramp-down time (bitrate dependent), AES encryption enabled
+	/* 0x6F */  REG_TESTDAGC|0x80, RF_DAGC_IMPROVED_LOWBETA0 , // run DAGC continuously in RX mode for Fading Margin Improvement, recommended default for AfcLowBetaOn=0
    
  };
 
 
-// // //write config function
-// // //se how to implement the configurations best maybe to put it here and do it like stm
-// // // after probe specific code is done but caller inside probe function
-// // //spi comunication test function
-// static int rfm69_spi_config(struct rfm69 *myrf)
-// {
-//     size_t len =1;
-//     short int *i=(short int)0x10;devt
-//     return spi_write(&myrf->spi,&i,len);
-// }
-// //spi message transmit
-// int rfm69_send_message(struct rfm69 *myrf, u16 *buf, u8 len)
-// {
-//     int err;
-//     struct spi_transfer transfer=
-//     {#define IRQPin  29
-//             .tx_buf=buf,
-//             .len=len,
-//             .bits_per_word=16,
-//     };
-//     struct spi_message message;
-//     mutex_lock(myrf->lock);
-//     spi_message_init(&message);
-//     spi_message_add_tail(&transfer,&message);
-//     err=spi_sync(myrf->spi,&messager);
-//     if(err<0)
-//     {
-//         printk("message error\n");//see if we can change something here
-//     }
-//     //add here write to reg to change mode
-//     mutex_unlock(myrf->lock);
-    
-//     return err;
-// }
-// //spi read message
-// int rfm69_read_message(struct rfm69 *myrf, u16 *buf, u8 len)
-// {
-//     int err;
-    
-//     struct spi_transfer transfer=
-//     {
-//             .tx_buf=buf,
-//             .len=len,
-//             .bits_per_word=16,
-//     };
-//         struct spi_message message;
-//     mutex_lock(myrf->lock);
-//     spi_message_init(&message);
-//     spi_message_add_tail(&transfer,&message);
-//     err=spi_sync(myrf->spi,&messager);
-//     if(err<0)
-//     {
-//         printk("message error\n");//see if we can change something here
-//     }
-//     //add here write to reg to change mode
-//     mutex_unlock(myrf->lock);
-    
-//     return err;
 
-
-
-// }
 //spi read register
 static u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 {
@@ -293,10 +237,34 @@ static ssize_t rfm69_write(struct file *filp, const char __user *buf,
 
     return status;
 }
+static ssize_t 
+rfm69_read(struct file *filp, const char __user *buf,
+		                        size_t count, loff_t *f_pos)
+{
+    struct receivedMessages *temp;
+    unsigned long missing;
+    ssize_t err=0;
+    mutex_lock(&myrf_global);
+
+    if(headList==NULL)
+    {
+        printk("There is no message to read\n");
+        return -ENOMSG;
+    }
+    missing =  copy_to_user(buf,headList->message, 0xA);
+       
+    if (missing == 0)
+    {
+        err=-1;
+    }
+    temp=headList->next;
+    kfree(headList);
+    headList=temp;
+    mutex_unlock(&myrf_global);
+    return err;
 
 
-
-
+}
 
 
 
@@ -347,19 +315,13 @@ static int rfm69_open(struct inode *inode, struct file *f)
     version=rfm69_read_register(myrf_global,REG_VERSION);
     if(version!=VERSION_DATA)
     {
-        printk("cannot comunicate with the RF transceiver\n",version);//see if we can change something here
+        printk("cannot comunicate with the RF transceiver\n");//see if we can change something here
         mutex_unlock(&myrf_global->lock);
 
          return -ENODEV;
     }
     err=rfm69_config(myrf_global);
-    /* opening the queue using default attributes  --  mq_open() */
-   /* myrf_global->msgq_id = mq_open(MSGQOBJ_NAME, O_WRONLY | O_CREAT, S_IRWXU | S_IRWXG, NULL);
-    if (myrf_global->msgq_id == (mqd_t)-1) {
-        printk("In mq_open()");
-        mutex_unlock(&myrf_global->lock);
-        return -ENOSPC;
-    }*/
+    printk("The process id is %d\n", (int) task_pid_nr(current));
 
   
 
@@ -385,14 +347,13 @@ static int rfm69_probe(struct spi_device *spi)
     if(myrf_global==NULL)
     {
         printk("failed to to alloc memory for device\n");
+        return -ENOMEM;
     }
     myrf_global->spi=spi;
    // myrf_global->devt=&spi->dev;
     mutex_init(&myrf_global->lock);
 
-	
-
-	myrf_global->devt = MKDEV(RF_MAJOR, 0);
+		myrf_global->devt = MKDEV(RF_MAJOR, 0);
    
 
 	dev = device_create(rfm_class, &spi->dev, myrf_global->devt,
@@ -450,41 +411,30 @@ static int rfm69_remove(struct spi_device *spi)
 
 	return 0;
 }
-/*struct spi_board_info __initdata  spi_board_info[] = {
-    {
-    .modalias = DRIVER_NAME,
-    .bus_num = 0,
-    .chip_select = 0,
-    },
-};
-*/
 
-/*
-static const struct of_device_id rfm69_id_table[] = {
-	{.name=DRIVER_NAME, .compatible="brcm,bcm2835-spi",},
-    {},
-};
-MODULE_DEVICE_TABLE(of,rfm69_id_table);*/
-/*static const struct spi_device_id rfm69_of_id_table[] = {
-	{DRIVER_NAME, 0},
-    {},
-};
-MODULE_DEVICE_TABLE(spi,rfm69_id_table);*/
+
+
 static irqreturn_t rx_isr(int irq, void *data)
 {
+    struct receivedMessages *newMessage;
     int value=5;
     u8 tx_buf[0xA]={0x0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-    u8 rx_buf[0xA]={0};
     siginfo_t info;
-        struct spi_transfer transfer=
+    struct spi_transfer transfer=
     {
             .tx_buf=tx_buf,
-            .rx_buf=rx_buf,
             .len=0xA,
             .bits_per_word=8,
     };
     struct spi_message message;
     printk("Message received by the transceiver\n");
+    newMessage=kzalloc(sizeof(*newMessage),GFP_KERNEL);
+    if(newMessage==NULL)
+    {
+        printk("could not allocate a new message\n");
+        return IRQ_HANDLED;
+    }
+
 
     if(myrf_global==NULL)
     {
@@ -492,19 +442,41 @@ static irqreturn_t rx_isr(int irq, void *data)
         return -ENODEV;
     }
     mutex_lock(&myrf_global->lock);
+    transfer.rx_buf=newMessage->message;
     spi_message_init(&message);
     spi_message_add_tail(&transfer,&message);
     value=spi_sync(myrf_global->spi,&message);
+    if(value<0)
+    {
+        printk("message was not read\n");
+        mutex_unlock(&myrf_global->lock);
+ 	    return IRQ_HANDLED;    
+    }
 
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_LISTENABORT|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_ON|RF_OPMODE_STANDBY);
 
-    //put here to write register to put back on listen mode
-    /* sending the message      --  mq_send() */
-  //  mq_send(myrf_global->msgq_id, rx_buf, MAX_MSG_LEN, 1);
+    
 
-    info.si_signo = SIGTRAP;
+    if(headList==NULL)
+    {
+        headList=newMessage;
+        tailList=newMessage;
+    }
+    else
+    {
+        tailList->next=newMessage;
+        tailList=newMessage;
+    }
+
+
+
+    //put here to write register to put back on listen mode
+
+
+
+    info.si_signo = SIGUSR1;
 	info.si_code = 1;
 	info.si_int  = 1234;
     send_sig_info( SIGUSR1, &info,myrf_global->PID );
@@ -519,6 +491,7 @@ static const struct file_operations rfm_fops =
  {
 	.owner =	THIS_MODULE,
     .open =		rfm69_open,
+    .read =     rfm69_read,
 	.write =	rfm69_write,
 
 };
@@ -596,15 +569,11 @@ static int __init rfm69_init(void)
 
 static void __exit rfm69_exit(void)
 {
-    struct rfm69 *myrf = spi_get_drvdata(spi_local);
+    
 
     printk( "exit\n");
-    // if( spi_device_rfm )
-    // {
-    //     spi_unregister_device( spi_device_rfm );
-    // }
+
 	spi_unregister_driver(&rfm69_driver);
-    //device_destroy(rfm_class, myrf->devt);
     class_destroy(rfm_class);
     // free irqs
 	free_irq(rx_irqs[0], NULL);	
