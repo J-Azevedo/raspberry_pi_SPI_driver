@@ -35,6 +35,7 @@ __attribute__((section("__versions"))) = {
 	{ 0x28cc25db, __VMLINUX_SYMBOL_STR(arm_copy_from_user) },
 	{ 0x8e865d3c, __VMLINUX_SYMBOL_STR(arm_delay_ops) },
 	{ 0x12da5bb2, __VMLINUX_SYMBOL_STR(__kmalloc) },
+	{ 0xa20e9f0d, __VMLINUX_SYMBOL_STR(nonseekable_open) },
 	{ 0x7a624abd, __VMLINUX_SYMBOL_STR(spi_setup) },
 	{ 0xee35d8ad, __VMLINUX_SYMBOL_STR(device_create) },
 	{ 0xeaad5b7a, __VMLINUX_SYMBOL_STR(__mutex_init) },
@@ -42,7 +43,6 @@ __attribute__((section("__versions"))) = {
 	{ 0xfd3e178c, __VMLINUX_SYMBOL_STR(kmalloc_caches) },
 	{ 0xf4fa543b, __VMLINUX_SYMBOL_STR(arm_copy_to_user) },
 	{ 0x5c7615b7, __VMLINUX_SYMBOL_STR(mutex_unlock) },
-	{ 0xa20e9f0d, __VMLINUX_SYMBOL_STR(nonseekable_open) },
 	{ 0x98211578, __VMLINUX_SYMBOL_STR(mutex_lock) },
 	{ 0x37a0cba, __VMLINUX_SYMBOL_STR(kfree) },
 	{ 0xea6c249c, __VMLINUX_SYMBOL_STR(device_destroy) },
@@ -60,4 +60,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "2E37FA692C74DD26BA42B99");
+MODULE_INFO(srcversion, "E91459A04C6B85125B2B31E");

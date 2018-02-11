@@ -321,7 +321,7 @@ static int rfm69_open(struct inode *inode, struct file *f)
          return -ENODEV;
     }
     err=rfm69_config(myrf_global);
-    printk("The process id is %d\n", (int) task_pid_nr(current));
+    myrf_global->PID= task_pid_nr(current);
 
   
 
