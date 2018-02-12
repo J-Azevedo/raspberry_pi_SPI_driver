@@ -60,6 +60,16 @@ static struct receivedMessages *tailList;
 static struct class *rfm_class;
 struct spi_device *spi_local;
 struct rfm69 *myrf_global;
+const unsigned char testMessage[][0x7]=
+{
+    {'A',1,5,70,0,0,0},
+    {'A',2,6,62,0,0,0},
+    {'A',3,7,76,0,0,0},
+    {'A',4,9,150,0,0,0},
+    {'S',0,5,73,0,0,0},
+
+};
+
 
 /* Define GPIOs for RX signal */
 static struct gpio signals[] = {
@@ -243,25 +253,22 @@ static ssize_t
 rfm69_read(struct file *filp, const char __user *buf,
 		                        size_t count, loff_t *f_pos)
 {
-    struct receivedMessages *temp;
+    static int i=0;
     unsigned long missing;
     ssize_t err=0;
     mutex_lock(&myrf_global);
 
-    if(headList==NULL)
-    {
-        printk("There is no message to read\n");
-        return -ENOMSG;
-    }
-    missing =  copy_to_user(buf,headList->message, 0xA);
+
+    missing =  copy_to_user(buf,testMessage[i++], 0xA);
        
     if (missing == 0)
     {
         err=-1;
     }
-    temp=headList->next;
-    kfree(headList);
-    headList=temp;
+    if(i==5)
+    {
+        i=0;
+    }
     mutex_unlock(&myrf_global);
     return err;
 
@@ -324,8 +331,6 @@ static int rfm69_open(struct inode *inode, struct file *f)
     }
     err=rfm69_config(myrf_global);
     myrf_global->PID= task_pid_nr(current);
-
-  
 
 
     mutex_unlock(&myrf_global->lock);
@@ -418,59 +423,19 @@ static int rfm69_remove(struct spi_device *spi)
 
 static irqreturn_t rx_isr(int irq, void *data)
 {
-    struct receivedMessages *newMessage;
     int value=5;
     struct task_struct *ts;
-    u8 tx_buf[0xA]={0x0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
     siginfo_t info;
-    struct spi_transfer transfer=
-    {
-            .tx_buf=tx_buf,
-            .len=0xA,
-            .bits_per_word=8,
-    };
-    struct spi_message message;
-    printk("Message received by the transceiver\n");
-    newMessage=kzalloc(sizeof(*newMessage),GFP_KERNEL);
-    if(newMessage==NULL)
-    {
-        printk("could not allocate a new message\n");
-        return IRQ_HANDLED;
-    }
 
 
-    if(myrf_global==NULL)
+
+   if(myrf_global==NULL)
     {
         printk("failed to access spi device\n");
         return -IRQ_HANDLED;
     }
     mutex_lock(&myrf_global->lock);
-    transfer.rx_buf=newMessage->message;
-    spi_message_init(&message);
-    spi_message_add_tail(&transfer,&message);
-    value=spi_sync(myrf_global->spi,&message);
-    
-    if(value<0)
-    {
-        printk("message was not read\n");
-        mutex_unlock(&myrf_global->lock);
- 	    return IRQ_HANDLED;    
-    }
-/*
-    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_LISTENABORT|RF_OPMODE_STANDBY);
-    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_STANDBY);
-    rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_ON|RF_OPMODE_STANDBY);
-*/
-    if(headList==NULL)
-    {
-        headList=newMessage;
-        tailList=newMessage;
-    }
-    else
-    {
-        tailList->next=newMessage;
-        tailList=newMessage;
-    }
+
 
     info.si_signo = SIGUSR1;
 	info.si_code = 1;
@@ -483,8 +448,6 @@ static irqreturn_t rx_isr(int irq, void *data)
         return IRQ_HANDLED;
     }
     send_sig_info( SIGUSR1, &info,ts );
-    //put message queue here
-    //send signal here
     mutex_unlock(&myrf_global->lock);
 
  	return IRQ_HANDLED;
