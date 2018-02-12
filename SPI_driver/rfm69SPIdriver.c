@@ -222,10 +222,12 @@ static ssize_t rfm69_write(struct file *filp, const char __user *buf,
 	else
     {
         status = -EFAULT;
+        mutex_unlock(&myrf_global);
+        return status;
 
     }
     rfm69_write_register(myrf_global,REG_OPMODE,TX_MODE);
-    udelay(5);
+    udelay(20);
     err=(rfm69_read_register(myrf_global,REG_IRQFLAGS1)&RF_IRQFLAGS1_MODEREADY);
     if(err==0)
     {
@@ -337,8 +339,8 @@ static int rfm69_open(struct inode *inode, struct file *f)
 static int rfm69_probe(struct spi_device *spi)
 {
     int ret;
-    unsigned long		minor;
-    struct rfm69 *myrf;
+    //unsigned long		minor;
+   // struct rfm69 *myrf;
     struct device *dev;
     int i=0, k=0;
     printk( "probe\n");
@@ -418,6 +420,7 @@ static irqreturn_t rx_isr(int irq, void *data)
 {
     struct receivedMessages *newMessage;
     int value=5;
+    struct task_struct *ts;
     u8 tx_buf[0xA]={0x0,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
     siginfo_t info;
     struct spi_transfer transfer=
@@ -439,26 +442,25 @@ static irqreturn_t rx_isr(int irq, void *data)
     if(myrf_global==NULL)
     {
         printk("failed to access spi device\n");
-        return -ENODEV;
+        return -IRQ_HANDLED;
     }
     mutex_lock(&myrf_global->lock);
     transfer.rx_buf=newMessage->message;
     spi_message_init(&message);
     spi_message_add_tail(&transfer,&message);
     value=spi_sync(myrf_global->spi,&message);
+    
     if(value<0)
     {
         printk("message was not read\n");
         mutex_unlock(&myrf_global->lock);
  	    return IRQ_HANDLED;    
     }
-
+/*
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_LISTENABORT|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_ON|RF_OPMODE_STANDBY);
-
-    
-
+*/
     if(headList==NULL)
     {
         headList=newMessage;
@@ -470,16 +472,17 @@ static irqreturn_t rx_isr(int irq, void *data)
         tailList=newMessage;
     }
 
-
-
-    //put here to write register to put back on listen mode
-
-
-
     info.si_signo = SIGUSR1;
 	info.si_code = 1;
 	info.si_int  = 1234;
-    send_sig_info( SIGUSR1, &info,myrf_global->PID );
+    ts=pid_task(myrf_global->PID,PIDTYPE_PID);
+    if(ts == NULL)
+    {
+        printk("no such pid\n");
+        mutex_unlock(&myrf_global->lock);
+        return IRQ_HANDLED;
+    }
+    send_sig_info( SIGUSR1, &info,ts );
     //put message queue here
     //send signal here
     mutex_unlock(&myrf_global->lock);
