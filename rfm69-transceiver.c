@@ -20,7 +20,7 @@
 #include <linux/uaccess.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
-#include "/home/joao/embedded_project/raspberry_pi_SPI_driver/SPI_driver/libraries/RFM69registers.h"
+#include "/home/joao/embedded_project/raspberry_pi_SPI_driver/libraries/RFM69registers.h"
 
 
 
