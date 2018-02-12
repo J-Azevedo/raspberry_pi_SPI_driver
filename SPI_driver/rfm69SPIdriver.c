@@ -38,7 +38,6 @@
 #define TX_MODE RF_OPMODE_SEQUENCER_ON|RF_OPMODE_TRANSMITTER|RF_OPMODE_LISTEN_OFF
 
 
-
 struct rfm69
 {
     struct mutex          lock;
@@ -52,7 +51,6 @@ static struct receivedMessages
 {
     u8 message[0xA];
     struct receivedMessages *next;
-
 }*headList;
 
 static struct receivedMessages *tailList;
@@ -68,8 +66,8 @@ static struct gpio signals[] = {
 static int rx_irqs[] = { -1 };
 
 	/*configurations for the transceiver*/
-  const u8 rf_config[] =
-  {
+const u8 rf_config[] =
+{
     /* 0x01 */  REG_OPMODE|0x80, RF_OPMODE_SEQUENCER_ON | RF_OPMODE_LISTEN_ON | RF_OPMODE_STANDBY,//turn on the sequencer, turn on listen mode
     /* 0x02 */  REG_DATAMODUL|0x80, RF_DATAMODUL_DATAMODE_PACKET | RF_DATAMODUL_MODULATIONTYPE_FSK | RF_DATAMODUL_MODULATIONSHAPING_00 , // no shaping
     /* 0x03 */  REG_BITRATEMSB|0x80, RF_BITRATEMSB_50000   , // speed of 250kbps->might be to fast testing needed
@@ -102,12 +100,13 @@ static int rx_irqs[] = { -1 };
     /* 0x3C */  REG_FIFOTHRESH|0x80, RF_FIFOTHRESH_TXSTART_FIFONOTEMPTY | RF_FIFOTHRESH_VALUE , // TX on FIFO not empty ->also need test
   	/* 0x3D */  REG_PACKETCONFIG2|0x80, RF_PACKET2_RXRESTARTDELAY_64BITS   | RF_PACKET2_AUTORXRESTART_ON | RF_PACKET2_AES_OFF , // RXRESTARTDELAY must match transmitter PA ramp-down time (bitrate dependent), AES encryption enabled
 	/* 0x6F */  REG_TESTDAGC|0x80, RF_DAGC_IMPROVED_LOWBETA0 , // run DAGC continuously in RX mode for Fading Margin Improvement, recommended default for AfcLowBetaOn=0
-   
  };
 
 
-
-//spi read register
+/*****************************************************
+ * Function that reads using SPI the content of one register 
+ * 
+ * ***************************************************/
 static u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
 {
     int value=5;
@@ -141,7 +140,10 @@ static u8 rfm69_read_register(struct rfm69 *myrf, u8 reg)
     return rx_buf[1];
 }
 
-//spi write register
+/************************************************
+ * Function that write using the SPI the content of one register
+ * 
+ * *********************************************/
 static u8 rfm69_write_register(struct rfm69 *myrf, u8 reg, u8 value)
 {
     int err;
@@ -177,6 +179,11 @@ static u8 rfm69_write_register(struct rfm69 *myrf, u8 reg, u8 value)
 
     return 0;
 }
+/***************************************************************
+ * Function that writes the message of the buffer to the FIFO
+ * 
+ * ************************************************************/
+
 static int rfm69_write_FIFO_message(struct rfm69 *myrf, char *buf, int len)
 {
         int err;
@@ -194,13 +201,15 @@ static int rfm69_write_FIFO_message(struct rfm69 *myrf, char *buf, int len)
     if(err<0)
     {
         printk("message was not transmited\n");
-        
-
     }
     return err;
-
-
 }
+
+/*************************************************
+ * Functions that writes a message to the FIFO
+ * and that sends it through the transceiver
+ * 
+ * **********************************************/
 static ssize_t rfm69_write(struct file *filp, const char __user *buf,
 		                        size_t count, loff_t *f_pos)
 {
@@ -235,12 +244,15 @@ static ssize_t rfm69_write(struct file *filp, const char __user *buf,
         status=-ECOMM;
     }
     mutex_unlock(&myrf_global);
-
-
     return status;
 }
-static ssize_t 
-rfm69_read(struct file *filp, const char __user *buf,
+
+/**************************************************
+ * Read the value of the oldest stored message in the linked list,
+ * that have been received by the transceiver
+ * 
+ * ***********************************************/
+static ssize_t rfm69_read(struct file *filp, const char __user *buf,
 		                        size_t count, loff_t *f_pos)
 {
     struct receivedMessages *temp;
@@ -268,7 +280,11 @@ rfm69_read(struct file *filp, const char __user *buf,
 
 }
 
-
+/************************************************************
+ * Function that configures the transceiver with the specific 
+ * configurations of our program
+ * 
+ * **********************************************************/
 
 static int rfm69_config(struct rfm69 *myrf)
 {
@@ -293,6 +309,13 @@ static int rfm69_config(struct rfm69 *myrf)
     return err;
 
 }
+
+/*************************************************************
+ * Open function that is called when we want to use the device
+ * drive, we call the transceiver configuration and make the 
+ * driver ready to use
+ * 
+ * **********************************************************/
 static int rfm69_open(struct inode *inode, struct file *f)
 {
     struct rfm69 *myrf;
@@ -302,9 +325,6 @@ static int rfm69_open(struct inode *inode, struct file *f)
     f->private_data=myrf_global;
     printk("open\n");
     mutex_lock(&myrf_global->lock);
-    //need to find a way to get PID from daemon process, it can even be provided
-    //by reference here
-
 
      nonseekable_open(inode, f);
     if(myrf_global==NULL)
@@ -325,22 +345,19 @@ static int rfm69_open(struct inode *inode, struct file *f)
     err=rfm69_config(myrf_global);
     myrf_global->PID= task_pid_nr(current);
 
-  
-
-
     mutex_unlock(&myrf_global->lock);
     return err;
 }
 
-/*
-        probe function it has the role of estabilishing communication between 
-        our board and the peripheral, is called automaticly by the system
-*/
+/********************************************************************
+ * probe function it has the role of estabilishing communication between 
+ * our board and the peripheral, is called automaticly by the system
+ * 
+ * ******************************************************************/
+ 
 static int rfm69_probe(struct spi_device *spi)
 {
     int ret;
-    //unsigned long		minor;
-   // struct rfm69 *myrf;
     struct device *dev;
     int i=0, k=0;
     printk( "probe\n");
@@ -352,7 +369,6 @@ static int rfm69_probe(struct spi_device *spi)
         return -ENOMEM;
     }
     myrf_global->spi=spi;
-   // myrf_global->devt=&spi->dev;
     mutex_init(&myrf_global->lock);
 
 		myrf_global->devt = MKDEV(RF_MAJOR, 0);
@@ -392,14 +408,15 @@ static int rfm69_probe(struct spi_device *spi)
         printk("spi device correclty configured\n");
         printk("chip select %d\n",i);
         printk("chip select gpio %d\n",k);
-
     }
-
-    
     return ret;
 }
 
-
+/**********************************************
+ * Function that removes the driver, and destroy
+ * the device that has been created
+ * 
+ * ********************************************/
 static int rfm69_remove(struct spi_device *spi)
 {
 	struct rfm69 *myrf;
@@ -430,6 +447,7 @@ static irqreturn_t rx_isr(int irq, void *data)
             .bits_per_word=8,
     };
     struct spi_message message;
+
     printk("Message received by the transceiver\n");
     newMessage=kzalloc(sizeof(*newMessage),GFP_KERNEL);
     if(newMessage==NULL)
@@ -437,7 +455,6 @@ static irqreturn_t rx_isr(int irq, void *data)
         printk("could not allocate a new message\n");
         return IRQ_HANDLED;
     }
-
 
     if(myrf_global==NULL)
     {
@@ -456,11 +473,10 @@ static irqreturn_t rx_isr(int irq, void *data)
         mutex_unlock(&myrf_global->lock);
  	    return IRQ_HANDLED;    
     }
-/*
+
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_LISTENABORT|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_OFF|RF_OPMODE_STANDBY);
     rfm69_write_register(myrf_global,REG_OPMODE,RF_OPMODE_SEQUENCER_ON|RF_OPMODE_LISTEN_ON|RF_OPMODE_STANDBY);
-*/
     if(headList==NULL)
     {
         headList=newMessage;
@@ -482,13 +498,11 @@ static irqreturn_t rx_isr(int irq, void *data)
         mutex_unlock(&myrf_global->lock);
         return IRQ_HANDLED;
     }
-    send_sig_info( SIGUSR1, &info,ts );
-    //put message queue here
     //send signal here
+    send_sig_info( SIGUSR1, &info,ts );
     mutex_unlock(&myrf_global->lock);
 
  	return IRQ_HANDLED;
-
 }
 static const struct file_operations rfm_fops =
  {
@@ -503,7 +517,7 @@ static struct spi_driver rfm69_driver =
 {
     .driver=
     {
-        .name = DRIVER_NAME,
+       .name = DRIVER_NAME,
        .bus  = &spi_bus_type, 
        .owner = THIS_MODULE,
     },
@@ -515,7 +529,6 @@ static int __init rfm69_init(void)
 {
   int status;
 
-
     printk( "init\n");
     status=register_chrdev(RF_MAJOR,"spi",&rfm_fops);
     if(status<0)
@@ -524,13 +537,16 @@ static int __init rfm69_init(void)
         return status;
     }
     rfm_class=class_create(THIS_MODULE,"RFM69");
-	if (IS_ERR(rfm_class))
+	
+    if (IS_ERR(rfm_class))
     {
         printk("failed to allocate class\n");
 		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
 		return PTR_ERR(rfm_class);
 	}    
+    
     status = gpio_request_array(signals, ARRAY_SIZE(signals));
+    
     if (status)
     {
         printk(KERN_ERR "RFRPI - Unable to request GPIOs for RX Signals: %d\n", status);
@@ -539,16 +555,20 @@ static int __init rfm69_init(void)
 		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
         return status;
     }
+    
      // Register IRQ for this GPIO
     status = gpio_to_irq(signals[0].gpio);
-    if(status < 0) {
+    if(status < 0) 
+    {
         printk(KERN_ERR "RFRPI - Unable to request IRQ: %d\n", status);
          free_irq(rx_irqs[0], NULL);
         class_destroy(rfm_class);
 		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
         return status;
     }
+    
     rx_irqs[0] = status;
+    
     printk(KERN_INFO "RFRPI - Successfully requested RX IRQ # %d\n", rx_irqs[0]);
     status = request_irq(rx_irqs[0], rx_isr, IRQF_TRIGGER_RISING , "rfrpi#rx", NULL);
     if(status) {
@@ -558,6 +578,7 @@ static int __init rfm69_init(void)
 		unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
         return status;
     }
+    
     status=spi_register_driver(&rfm69_driver);
     if(status<0)
     {
@@ -572,18 +593,16 @@ static int __init rfm69_init(void)
 
 static void __exit rfm69_exit(void)
 {
-    
 
     printk( "exit\n");
-
 	spi_unregister_driver(&rfm69_driver);
     class_destroy(rfm_class);
+    
     // free irqs
 	free_irq(rx_irqs[0], NULL);	
 	
 	// unregister
 	gpio_free_array(signals, ARRAY_SIZE(signals));  
-
 	unregister_chrdev(RF_MAJOR, rfm69_driver.driver.name);
 }
 
